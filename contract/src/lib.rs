@@ -54,6 +54,7 @@ const EXCLUSIVE_IMAGE_HASH: &str = "QmW2UvM24fDkJ6rbhL25AbpPfAsGoMACYx8AMxxF7he3
 
 /// accepts rarity of pack and returns image url
 ///
+/// not tested as it's like a constant
 pub(crate) fn get_pack_image(rarity: Rarity) -> String {
     match rarity {
         Rarity::Usual => format!("{}{}", BASE_IPFS, USUAL_IMAGE_HASH),
@@ -64,6 +65,7 @@ pub(crate) fn get_pack_image(rarity: Rarity) -> String {
     }
 }
 
+// not tested as it's like a constant
 pub(crate) fn get_pack_metadata(rarity: Rarity) -> TokenMetadata {
     let image_url = Some(get_pack_image(rarity));
     let issued_at: Option<String> = Some(env::block_timestamp().to_string());
@@ -91,6 +93,7 @@ pub(crate) fn get_pack_metadata(rarity: Rarity) -> TokenMetadata {
     }
 }
 
+// not tested as it's like a constant
 pub fn map_deposit_to_rarity(deposit: Balance) -> Rarity {
     match deposit {
         USUAL_DEPOSIT => Rarity::Usual,
@@ -163,5 +166,61 @@ near_contract_standards::impl_non_fungible_token_enumeration!(Contract, tokens);
 impl NonFungibleTokenMetadataProvider for Contract {
     fn nft_metadata(&self) -> NFTContractMetadata {
         self.metadata.get().unwrap()
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use near_sdk::test_utils::{accounts, VMContextBuilder};
+    use near_sdk::testing_env;
+    use std::collections::HashMap;
+
+    use super::*;
+    const MINT_STORAGE_COST: u128 = 5870000000000000000000;
+
+    fn set_context(predecessor_account_id: AccountId, attached_deposit: Option<Balance>) -> VMContextBuilder {
+        let mut builder = VMContextBuilder::new();
+        builder
+            .current_account_id(accounts(0))
+            .signer_account_id(predecessor_account_id.clone())
+            .predecessor_account_id(predecessor_account_id);
+        if attached_deposit.is_some() {
+            builder.attached_deposit(attached_deposit.unwrap());
+        }
+
+        testing_env!(builder.build());
+        builder
+    }
+
+    #[test]
+    fn test_new() {
+        set_context(accounts(1), None);
+        let contract = Contract::new(accounts(1).into());
+        assert_eq!(contract.nft_token("1".to_string()), None);
+    }
+
+    #[test]
+    #[should_panic(expected = "The contract is not initialized")]
+    fn test_default() {
+        let context = set_context(accounts(1), None);
+        let _contract = Contract::default();
+    }
+
+    #[test]
+    fn test_buy_pack() {
+        let mut context = set_context(accounts(0), Some(USUAL_DEPOSIT));
+        let mut contract = Contract::new(accounts(0).into());
+
+        testing_env!(context
+            .storage_usage(env::storage_usage())
+            .account_balance()
+            .build());
+
+        let token = contract.nft_buy_pack(accounts(0));
+        assert_eq!(token.token_id, "pack-1");
+        assert_eq!(token.owner_id.to_string(), accounts(0).to_string());
+        assert_eq!(token.metadata.unwrap(), get_pack_metadata(Rarity::Usual));
+        assert_eq!(token.approved_account_ids.unwrap(), HashMap::new());
+        assert_eq!(contract.nfts_count, 1);
     }
 }
