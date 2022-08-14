@@ -193,17 +193,7 @@ impl Contract {
 
         let owner_id = self.tokens.owner_by_id.get(&token_id).expect("Token id does not exist");
         self.tokens.nft_transfer(receiver_id.clone(), token_id.clone(), Some(approval_id), None);
-        log!(
-            json!({
-                "type": "nft_transfer",
-                "params": {
-                    "token_id": token_id,
-                    "sender_id": owner_id,
-                    "receiver_id": receiver_id,
-                }
-            })
-                .to_string()
-        );
+
         let balance_u128: u128 = balance.into();
         let mut payout: Payout = Payout { payout: HashMap::new() };
         payout.payout.insert(env::current_account_id(), U128::from(balance_u128 / 100 * ROYALTY_PERCENT));
