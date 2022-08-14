@@ -1,72 +1,161 @@
-/*
- * Example smart contract written in RUST
- *
- * Learn more about writing NEAR smart contracts with Rust:
- * https://near-docs.io/develop/Contract
- *
- */
+extern crate core;
 
+use near_contract_standards::non_fungible_token::metadata::{
+    NFTContractMetadata, NonFungibleTokenMetadataProvider, TokenMetadata, NFT_METADATA_SPEC,
+};
+use std::time::{SystemTime, UNIX_EPOCH};
+use near_contract_standards::non_fungible_token::{Token, TokenId};
+use near_contract_standards::non_fungible_token::NonFungibleToken;
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
-use near_sdk::{log, near_bindgen};
+use near_sdk::serde::{Serialize, Deserialize};
+use near_sdk::collections::LazyOption;
+use near_sdk::{
+    env, near_bindgen, AccountId, BorshStorageKey, PanicOnDefault, Promise, PromiseOrValue, log, Balance
+};
+use near_sdk::json_types::U128;
 
-// Define the default message
-const DEFAULT_MESSAGE: &str = "Hello";
 
-// Define the contract structure
+const USUAL_DEPOSIT: Balance = 1_000_000_000_000_000_000_000_000;
+const RARE_DEPOSIT: Balance = 2_000_000_000_000_000_000_000_000;
+const SUPER_RARE_DEPOSIT: Balance = 3_000_000_000_000_000_000_000_000;
+const MYTH_DEPOSIT: Balance = 4_000_000_000_000_000_000_000_000;
+const EXCLUSIVE_DEPOSIT: Balance = 5_000_000_000_000_000_000_000_000;
+
 #[near_bindgen]
-#[derive(BorshDeserialize, BorshSerialize)]
+#[derive(BorshDeserialize, BorshSerialize, PanicOnDefault)]
 pub struct Contract {
-    message: String,
+    tokens: NonFungibleToken,
+    metadata: LazyOption<NFTContractMetadata>,
 }
 
-// Define the default, which automatically initializes the contract
-impl Default for Contract{
-    fn default() -> Self{
-        Self{message: DEFAULT_MESSAGE.to_string()}
+#[derive(Serialize, Deserialize, Copy, Clone)]
+#[serde(crate = "near_sdk::serde")]
+#[derive(BorshDeserialize, BorshSerialize)]
+pub enum Rarity {
+    Usual,
+    Rare,
+    SuperRare,
+    Myth,
+    Exclusive,
+}
+
+const BASE_IPFS: &str = "https://ipfs.io/ipfs/";
+
+const USUAL_IMAGE_HASH: &str = "QmXeLAimzWpaheC1dRiZQqTXj1C5Tv4y645nTgAsD2M31A";
+const RARE_IMAGE_HASH: &str = "QmWifMRCwHe4gkmdwoSrep7bSjjgeyaA9ZcLBCeyCx22KP";
+const SUPER_RARE_IMAGE_HASH: &str = "QmU3oJWhg7N6Mq6cahBJ3yE7K2ECN9ugtmKFHAM1JvAWP4";
+const MYTH_IMAGE_HASH: &str = "QmS7W8uPoFWoEei3mb1Unkuht2oQnKXaQaKd4JdfgxUZLE";
+const EXCLUSIVE_IMAGE_HASH: &str = "QmW2UvM24fDkJ6rbhL25AbpPfAsGoMACYx8AMxxF7he3Eu";
+
+
+/// accepts rarity of pack and returns image url
+///
+pub(crate) fn get_pack_image(rarity: Rarity) -> String {
+    match rarity {
+        Rarity::Usual => format!("{}{}", BASE_IPFS, USUAL_IMAGE_HASH),
+        Rarity::Rare => format!("{}{}", BASE_IPFS, RARE_IMAGE_HASH),
+        Rarity::SuperRare => format!("{}{}", BASE_IPFS, SUPER_RARE_IMAGE_HASH),
+        Rarity::Myth => format!("{}{}", BASE_IPFS, MYTH_IMAGE_HASH),
+        Rarity::Exclusive => format!("{}{}", BASE_IPFS, EXCLUSIVE_IMAGE_HASH)
     }
 }
 
-// Implement the contract structure
+pub fn get_current_time() -> u128 {
+    let start = SystemTime::now();
+    start.duration_since(UNIX_EPOCH)
+        .expect("Time went backwards").as_millis()
+
+}
+
+pub(crate) fn get_pack_metadata(rarity: Rarity) -> TokenMetadata {
+    let image_url = Some(get_pack_image(rarity));
+    let issued_at: Option<String> = Some(get_current_time().to_string());
+    let title = match rarity {
+        Rarity::Usual => Some("Usual pack".to_string()),
+        Rarity::Rare => Some("Rare pack".to_string()),
+        Rarity::SuperRare => Some("Super rare pack".to_string()),
+        Rarity::Myth => Some("Myth rarity pack".to_string()),
+        Rarity::Exclusive => Some("Exclusive pack".to_string())
+    };
+    let extra: Option<String> = Some(format!("{{\"type\": \"pack\", \"rarity\": \"{}\"}}", near_sdk::serde_json::to_string(&rarity).expect("Cannot serialize rarity")));
+    TokenMetadata {
+        title,
+        description: None,
+        media: image_url,
+        media_hash: None,
+        copies: None,
+        issued_at,
+        expires_at: None,
+        starts_at: None,
+        updated_at: None,
+        extra,
+        reference: None,
+        reference_hash: None
+    }
+}
+
+pub fn map_deposit_to_rarity(deposit: Balance) -> Rarity {
+    match deposit {
+        USUAL_DEPOSIT => Rarity::Usual,
+        RARE_DEPOSIT => Rarity::Rare,
+        SUPER_RARE_DEPOSIT => Rarity::SuperRare,
+        MYTH_DEPOSIT => Rarity::Myth,
+        EXCLUSIVE_DEPOSIT => Rarity::Exclusive,
+        _ => panic!("Wrong deposit")
+    }
+}
+
+pub fn get_token_id() -> TokenId {
+    format!("pack-{}", get_current_time().to_string())
+}
+
+#[derive(BorshSerialize, BorshStorageKey)]
+enum StorageKey {
+    NonFungibleToken,
+    Metadata,
+    TokenMetadata,
+    Approval,
+    Enumeration
+}
+
 #[near_bindgen]
 impl Contract {
-    // Public method - returns the greeting saved, defaulting to DEFAULT_MESSAGE
-    pub fn get_greeting(&self) -> String {
-        return self.message.clone();
+
+    #[init]
+    pub fn new(owner_id: AccountId, metadata: NFTContractMetadata) -> Self {
+        assert!(!env::state_exists(), "Already initialized");
+        metadata.assert_valid();
+        Self {
+            tokens: NonFungibleToken::new(
+                StorageKey::NonFungibleToken,
+                owner_id,
+                Some(StorageKey::TokenMetadata),
+                Some(StorageKey::Enumeration),
+                Some(StorageKey::Approval),
+            ),
+            metadata: LazyOption::new(StorageKey::Metadata, Some(&metadata)),
+        }
     }
 
-    // Public method - accepts a greeting, such as "howdy", and records it
-    pub fn set_greeting(&mut self, message: String) {
-        // Use env::log to record logs permanently to the blockchain!
-        log!("Saving greeting {}", message);
-        self.message = message;
+    #[payable]
+    pub fn nft_buy_pack(
+        &mut self,
+        receiver_id: AccountId,
+    ) -> Token {
+        let token_id = get_token_id();
+        let token_metadata = get_pack_metadata(map_deposit_to_rarity(env::attached_deposit()));
+        self.tokens.internal_mint(token_id, receiver_id, Some(token_metadata))
     }
 }
 
-/*
- * The rest of this file holds the inline tests for the code above
- * Learn more about Rust tests: https://doc.rust-lang.org/book/ch11-01-writing-tests.html
- */
-#[cfg(test)]
-mod tests {
-    use super::*;
 
-    #[test]
-    fn get_default_greeting() {
-        let contract = Contract::default();
-        // this test did not call set_greeting so should return the default "Hello" greeting
-        assert_eq!(
-            contract.get_greeting(),
-            "Hello".to_string()
-        );
-    }
+near_contract_standards::impl_non_fungible_token_core!(Contract, tokens);
+near_contract_standards::impl_non_fungible_token_approval!(Contract, tokens);
+near_contract_standards::impl_non_fungible_token_enumeration!(Contract, tokens);
 
-    #[test]
-    fn set_then_get_greeting() {
-        let mut contract = Contract::default();
-        contract.set_greeting("howdy".to_string());
-        assert_eq!(
-            contract.get_greeting(),
-            "howdy".to_string()
-        );
+#[near_bindgen]
+impl NonFungibleTokenMetadataProvider for Contract {
+    fn nft_metadata(&self) -> NFTContractMetadata {
+        self.metadata.get().unwrap()
     }
 }
