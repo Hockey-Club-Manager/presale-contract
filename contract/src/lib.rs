@@ -23,7 +23,7 @@ const SUPER_RARE_DEPOSIT: Balance = 3_000_000_000_000_000_000_000_000;
 const MYTH_DEPOSIT: Balance = 4_000_000_000_000_000_000_000_000;
 const EXCLUSIVE_DEPOSIT: Balance = 5_000_000_000_000_000_000_000_000;
 
-
+const ICON_URL: &str = "https://ipfs.io/ipfs/QmRP5pPQpgmPQfFVFWdS45HdQj9FoAVPwkiZYq6c8MFY91";
 #[near_bindgen]
 #[derive(BorshDeserialize, BorshSerialize, PanicOnDefault)]
 pub struct Contract {
@@ -124,7 +124,7 @@ impl Contract {
             spec: NFT_METADATA_SPEC.to_string(),
             name: "Hockey packs presale".to_string(),
             symbol: "HCM_PACKS".to_string(),
-            icon: None,
+            icon: Option(ICON_URL),
             base_uri: None,
             reference: None,
             reference_hash: None
