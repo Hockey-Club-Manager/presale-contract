@@ -3,7 +3,6 @@ extern crate core;
 use near_contract_standards::non_fungible_token::metadata::{
     NFTContractMetadata, NonFungibleTokenMetadataProvider, TokenMetadata, NFT_METADATA_SPEC,
 };
-use std::time::{SystemTime, UNIX_EPOCH};
 use near_contract_standards::non_fungible_token::{Token, TokenId};
 use near_contract_standards::non_fungible_token::NonFungibleToken;
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
@@ -13,6 +12,9 @@ use near_sdk::{
     env, near_bindgen, AccountId, BorshStorageKey, PanicOnDefault, Promise, PromiseOrValue, log, Balance
 };
 use near_sdk::json_types::U128;
+use crate::nft_minter::internal_mint;
+
+mod nft_minter;
 
 
 const USUAL_DEPOSIT: Balance = 1_000_000_000_000_000_000_000_000;
@@ -21,11 +23,13 @@ const SUPER_RARE_DEPOSIT: Balance = 3_000_000_000_000_000_000_000_000;
 const MYTH_DEPOSIT: Balance = 4_000_000_000_000_000_000_000_000;
 const EXCLUSIVE_DEPOSIT: Balance = 5_000_000_000_000_000_000_000_000;
 
+
 #[near_bindgen]
 #[derive(BorshDeserialize, BorshSerialize, PanicOnDefault)]
 pub struct Contract {
     tokens: NonFungibleToken,
     metadata: LazyOption<NFTContractMetadata>,
+    nfts_count: u128
 }
 
 #[derive(Serialize, Deserialize, Copy, Clone)]
@@ -60,16 +64,9 @@ pub(crate) fn get_pack_image(rarity: Rarity) -> String {
     }
 }
 
-pub fn get_current_time() -> u128 {
-    let start = SystemTime::now();
-    start.duration_since(UNIX_EPOCH)
-        .expect("Time went backwards").as_millis()
-
-}
-
 pub(crate) fn get_pack_metadata(rarity: Rarity) -> TokenMetadata {
     let image_url = Some(get_pack_image(rarity));
-    let issued_at: Option<String> = Some(get_current_time().to_string());
+    let issued_at: Option<String> = Some(env::block_timestamp().to_string());
     let title = match rarity {
         Rarity::Usual => Some("Usual pack".to_string()),
         Rarity::Rare => Some("Rare pack".to_string()),
@@ -77,7 +74,7 @@ pub(crate) fn get_pack_metadata(rarity: Rarity) -> TokenMetadata {
         Rarity::Myth => Some("Myth rarity pack".to_string()),
         Rarity::Exclusive => Some("Exclusive pack".to_string())
     };
-    let extra: Option<String> = Some(format!("{{\"type\": \"pack\", \"rarity\": \"{}\"}}", near_sdk::serde_json::to_string(&rarity).expect("Cannot serialize rarity")));
+    let extra: Option<String> = Some(format!("{{\"type\": \"pack\", \"rarity\": {}}}", near_sdk::serde_json::to_string(&rarity).expect("Cannot serialize rarity")));
     TokenMetadata {
         title,
         description: None,
@@ -105,10 +102,6 @@ pub fn map_deposit_to_rarity(deposit: Balance) -> Rarity {
     }
 }
 
-pub fn get_token_id() -> TokenId {
-    format!("pack-{}", get_current_time().to_string())
-}
-
 #[derive(BorshSerialize, BorshStorageKey)]
 enum StorageKey {
     NonFungibleToken,
@@ -122,8 +115,18 @@ enum StorageKey {
 impl Contract {
 
     #[init]
-    pub fn new(owner_id: AccountId, metadata: NFTContractMetadata) -> Self {
+    pub fn new(owner_id: AccountId) -> Self {
         assert!(!env::state_exists(), "Already initialized");
+        let metadata = NFTContractMetadata {
+            spec: NFT_METADATA_SPEC.to_string(),
+            name: "Hockey packs presale".to_string(),
+            symbol: "HCM_PACKS".to_string(),
+            icon: None,
+            base_uri: None,
+            reference: None,
+            reference_hash: None
+        };
+
         metadata.assert_valid();
         Self {
             tokens: NonFungibleToken::new(
@@ -134,6 +137,7 @@ impl Contract {
                 Some(StorageKey::Approval),
             ),
             metadata: LazyOption::new(StorageKey::Metadata, Some(&metadata)),
+            nfts_count: 0
         }
     }
 
@@ -142,9 +146,11 @@ impl Contract {
         &mut self,
         receiver_id: AccountId,
     ) -> Token {
-        let token_id = get_token_id();
+        let token_id = format!("pack-{}", (self.nfts_count + 1).to_string());
         let token_metadata = get_pack_metadata(map_deposit_to_rarity(env::attached_deposit()));
-        self.tokens.internal_mint(token_id, receiver_id, Some(token_metadata))
+        let nft = internal_mint(&mut self.tokens, token_id, receiver_id, Some(token_metadata));
+        self.nfts_count += 1;
+        nft
     }
 }
 

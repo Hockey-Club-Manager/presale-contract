@@ -42,3 +42,4 @@ dist
 .cache
 .idea
 contract/target/
+*/neardev
