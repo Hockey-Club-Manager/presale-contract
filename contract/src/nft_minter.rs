@@ -1,12 +1,10 @@
 use near_contract_standards::non_fungible_token::NonFungibleToken;
 use near_contract_standards::non_fungible_token::metadata::{
-    TokenMetadata, NFT_METADATA_SPEC,
+    TokenMetadata
 };
 use near_contract_standards::non_fungible_token::{Token, TokenId};
 use near_contract_standards::non_fungible_token::events::NftMint;
-use near_sdk::{
-    env, near_bindgen, AccountId, log, Balance
-};
+use near_sdk::AccountId;
 
 
 pub fn internal_mint(
